@@ -253,9 +253,29 @@ def main():
             return
 
         time.sleep(4)
-        # 部分面板点 Order now 后会弹确认框，抓一下
+        # 诊断：点 Order now 后当前页（可能跳到 checkout/invoice）
+        print("📄 Order now 后 URL:", sb.get_current_url())
+        sb.save_screenshot("after_order.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "after_order.png", "🖥️ Order now 后页面（调试）")
         try:
-            sb.uc_click('button:contains("Confirm"), button:contains("Yes"), button:contains("确定"), button:contains("Place order")', timeout=5)
+            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
+            print("📝 Order now 后文字:", txt[:1200])
+        except Exception:
+            pass
+        els = sb.execute_script(
+            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
+        print("🔘 Order now 后可点元素:", " | ".join(els[:60]))
+
+        # 点 Order now 后可能跳到 checkout/invoice 页，需再点「完成/支付」
+        try:
+            sb.uc_click('button:contains("Complete"), button:contains("Pay now"), button:contains("Pay"), button:contains("Place order"), button:contains("Checkout"), a:contains("Complete order")', timeout=8)
+            print("✅ 点击完成/支付")
+            time.sleep(5)
+        except Exception:
+            print("ℹ️ 无后续完成按钮（可能已直接下单）")
+        # 也可能弹确认框
+        try:
+            sb.uc_click('button:contains("Confirm"), button:contains("Yes"), button:contains("确定")', timeout=5)
             print("✅ 点击确认弹窗")
             time.sleep(4)
         except Exception:
