@@ -252,16 +252,41 @@ def main():
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 续费页未找到确认按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
             return
 
-        time.sleep(6)
-        src = sb.get_page_source()
-        low = src.lower()
-        if any(k in low for k in ["successfully purchased", "续费成功", "renewed", "order confirmed", "payment successful"]):
-            msg = f"✅ The Rose 续期成功！\n🌐 IP: {ip}\n📦 {REPO_URL}"
-            sb.save_screenshot("success.png")
-            print(msg)
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
-        else:
-            msg = f"⚠️ 续期未确认成功（可能余额不足需充值，或确认按钮文案不同）\n🌐 IP: {ip}\n📦 {REPO_URL}"
+        time.sleep(4)
+        # 部分面板点 Order now 后会弹确认框，抓一下
+        try:
+            sb.uc_click('button:contains("Confirm"), button:contains("Yes"), button:contains("确定"), button:contains("Place order")', timeout=5)
+            print("✅ 点击确认弹窗")
+            time.sleep(4)
+        except Exception:
+            pass
+
+        # 以服务器实际到期日为准验证是否真续上（比关键词可靠）
+        time.sleep(2)
+        try:
+            sb.open("https://client.therose.cloud/panel?routeName=servers")
+            time.sleep(3)
+            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
+            m = re.search(r"Valid until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
+            new_valid = m.group(1) if m else "?"
+            print("📅 续期后 Valid until:", new_valid)
+            if new_valid not in ("2026-07-22 17:11", "?"):
+                msg = f"✅ The Rose 续期成功！新到期 {new_valid}\n🌐 IP: {ip}\n📦 {REPO_URL}"
+                sb.save_screenshot("success.png")
+                print(msg)
+                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            else:
+                msg = f"⚠️ 续期未生效（Valid until 仍为/未知: {new_valid}）\n🌐 IP: {ip}\n📦 {REPO_URL}"
+                sb.save_screenshot("failed.png")
+                print(msg)
+                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+        except Exception as e:
+            print(f"⚠️ 验证失败: {e}")
+            src = sb.get_page_source().lower()
+            if any(k in src for k in ["successfully purchased", "续费成功", "renewed", "order confirmed", "payment successful"]):
+                msg = f"✅ The Rose 续期成功！\n🌐 IP: {ip}\n📦 {REPO_URL}"
+            else:
+                msg = f"⚠️ 续期状态未知\n🌐 IP: {ip}\n📦 {REPO_URL}"
             sb.save_screenshot("failed.png")
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
