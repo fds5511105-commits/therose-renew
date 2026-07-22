@@ -25,22 +25,38 @@ jobs:
           pip install seleniumbase requests --quiet
           seleniumbase install chromedriver
 
-      - name: ⚙️ 设置代理 (sing-box via setup_proxy.sh)
+      - name: ⚙️ 配置代理
         env:
           NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
-          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh) || true
-          if [ -f sing-box-config.json ]; then
-            jq 'if (.outbounds[0].transport // {}).type == "tcp" then del(.outbounds[0].transport) else . end' sing-box-config.json > /tmp/sb_fixed.json && mv /tmp/sb_fixed.json sing-box-config.json
-            echo "[INFO] 修正后的 sing-box 配置:"; cat sing-box-config.json
+          set -e
+          if [ -z "$NODE_LINK" ]; then
+            echo "⚠️ 未设置 NODE_LINK，直连"
+            echo "PROXY=" >> "$GITHUB_ENV"
+            exit 0
           fi
-          pkill -f sing-box 2>/dev/null || true; sleep 2
-          nohup ./sing-box run -c sing-box-config.json > sing-box.log 2>&1 &
-          sleep 6
-          if pgrep -f sing-box >/dev/null; then
-            echo "[INFO] sing-box 已启动，出口 IP ->"; curl -x socks5://127.0.0.1:1080 -s --max-time 15 https://api.ipify.org || echo "(自检请求失败但进程在运行)"
+          # 现成 SOCKS 代理：socks://base64(user:pass@host:port)?remarks=...
+          if [[ "$NODE_LINK" == socks://* ]] || [[ "$NODE_LINK" == socks5://* ]]; then
+            echo "🧦 检测到 SOCKS 链接，直接使用"
+            b64="${NODE_LINK#*://}"
+            b64="${b64%%\?*}"
+            decoded=$(python3 -c "import base64,sys; print(base64.b64decode(sys.argv[1]).decode())" "$b64")
+            if [ -z "$decoded" ]; then
+              echo "❌ SOCKS 链接 base64 解码失败"; exit 1
+            fi
+            PROXY="socks5://$decoded"
+            echo "::add-mask::$PROXY"   # 日志里遮蔽凭据
+            echo "PROXY=$PROXY" >> "$GITHUB_ENV"
+            echo "✅ SOCKS 代理已配置"
           else
-            echo "[ERROR] sing-box 仍未启动"; cat sing-box.log; exit 1
+            # 节点链接（vmess/vless/trojan/hy2）→ btpp05/mochi 验证过的 setup_proxy.sh
+            echo "🔧 用 setup_proxy.sh 从节点链接建代理"
+            curl -fsSL https://raw.githubusercontent.com/btpp05/mochi-hosting-renew/main/setup_proxy.sh -o setup_proxy.sh
+            chmod +x setup_proxy.sh
+            ./setup_proxy.sh "$NODE_LINK"
+            echo "PROXY=socks5://127.0.0.1:1080" >> "$GITHUB_ENV"
+            echo "✅ 代理已启动，自检中..."
+            curl -fsS --max-time 20 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org || echo "⚠️ 代理自检失败"
           fi
 
       - name: 🚀 运行续期
@@ -49,7 +65,6 @@ jobs:
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY: socks5://127.0.0.1:1080
         run: |
           xvfb-run --auto-servernum python3 renew_therose.py
 
