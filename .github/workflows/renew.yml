@@ -25,19 +25,50 @@ jobs:
           pip install seleniumbase requests --quiet
           seleniumbase install chromedriver
 
-      - name: 🚀 运行续期（走代理）
+      - name: ⚙️ 设置代理 (hysteria2 via sing-box)
+        env:
+          KATA_LINK: ${{ secrets.KATA_LINK }}
+        run: |
+          LINK="$KATA_LINK"
+          WITHOUT_SCHEME="${LINK#hysteria2://}"
+          AUTH="${WITHOUT_SCHEME%%@*}"
+          REMAINDER="${WITHOUT_SCHEME#*@}"
+          HOST="${REMAINDER%%:*}"
+          PORT="${REMAINDER%%\?*}"
+          PORT="${PORT#*:}"
+          QUERY="${REMAINDER#*\?}"
+          QUERY="${QUERY%%#*}"
+          PEER="www.bing.com"
+          INSECURE="false"
+          for pair in $(echo "$QUERY" | tr '&' ' '); do
+            key="${pair%%=*}"
+            val="${pair#*=}"
+            case "$key" in
+              peer) PEER="$val" ;;
+              insecure) INSECURE="$val" ;;
+            esac
+          done
+          python3 gen_sb.py "$AUTH" "$HOST" "$PORT" "$PEER" "$INSECURE" > v.json
+          curl -sLo sb https://amd64.ssss.nyc.mn/sb
+          chmod +x sb
+          nohup ./sb run -c v.json > /dev/null 2>&1 &
+          sleep 4
+          echo "🌐 出口 IP: $(curl -sx socks5://127.0.0.1:1080 --max-time 10 https://api.ipify.org)"
+
+      - name: 🚀 运行续期
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY: ${{ secrets.PROXY }}
+          PROXY: socks5://127.0.0.1:1080
         run: |
           xvfb-run --auto-servernum python3 renew_therose.py
 
       - name: 🧽 清理
         if: always()
         run: |
+          pkill -f sing-box || true
           pkill -f chromedriver || true
           pkill -f chrome || true
           pkill -f Xvfb || true
