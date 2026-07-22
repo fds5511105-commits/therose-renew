@@ -8,6 +8,7 @@ EMAIL = os.environ.get("EMAIL") or ""
 PASSWORD = os.environ.get("PASSWORD") or ""
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
+PROXY_URL = os.environ.get("PROXY") or ""  # 代理
 
 BASE_URL = "https://client.therose.cloud/login"
 REPO_URL = "https://github.com/btpp05/therose-renew"
@@ -171,7 +172,12 @@ def login(sb, email, password):
 def main():
     print("🚀 启动浏览器")
 
-    with SB(uc=True, headless=False) as sb:
+    sb_kwargs = {"uc": True, "headless": False}
+    if PROXY_URL:
+        print(f"🔗 使用代理: {PROXY_URL}")
+        sb_kwargs["proxy"] = PROXY_URL
+
+    with SB(**sb_kwargs) as sb:
         # 检测出口IP
         proxy_ip = ""
         try:

@@ -25,12 +25,13 @@ jobs:
           pip install seleniumbase requests --quiet
           seleniumbase install chromedriver
 
-      - name: 🚀 运行续期
+      - name: 🚀 运行续期（走代理）
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY: ${{ secrets.PROXY }}
         run: |
           xvfb-run --auto-servernum python3 renew_therose.py
 
