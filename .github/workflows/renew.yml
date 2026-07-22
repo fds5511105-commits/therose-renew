@@ -27,7 +27,7 @@ jobs:
 
       - name: ⚙️ 设置代理 (sing-box via setup_proxy.sh)
         env:
-          NODE_LINK: ${{ secrets.KATA_LINK }}
+          NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
           bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh) || true
           if [ -f sing-box-config.json ]; then
