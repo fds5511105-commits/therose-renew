@@ -1,0 +1,42 @@
+name: The Rose Cloud Renew
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 拉取脚本
+        uses: actions/checkout@v4
+
+      - name: 🐍 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          pip install seleniumbase requests --quiet
+          seleniumbase install chromedriver
+
+      - name: 🚀 运行续期
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          xvfb-run --auto-servernum python3 renew_therose.py
+
+      - name: 🧽 清理
+        if: always()
+        run: |
+          pkill -f chromedriver || true
+          pkill -f chrome || true
+          pkill -f Xvfb || true
