@@ -21,39 +21,27 @@ jobs:
       - name: 🐍 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb python3-tk python3-dev
+          sudo apt-get install -y xvfb python3-tk python3-dev jq
           pip install seleniumbase requests --quiet
           seleniumbase install chromedriver
 
-      - name: ⚙️ 设置代理 (hysteria2 via sing-box)
+      - name: ⚙️ 设置代理 (sing-box via setup_proxy.sh)
         env:
-          KATA_LINK: ${{ secrets.KATA_LINK }}
+          NODE_LINK: ${{ secrets.KATA_LINK }}
         run: |
-          LINK="$KATA_LINK"
-          WITHOUT_SCHEME="${LINK#hysteria2://}"
-          AUTH="${WITHOUT_SCHEME%%@*}"
-          REMAINDER="${WITHOUT_SCHEME#*@}"
-          HOST="${REMAINDER%%:*}"
-          PORT="${REMAINDER%%\?*}"
-          PORT="${PORT#*:}"
-          QUERY="${REMAINDER#*\?}"
-          QUERY="${QUERY%%#*}"
-          PEER="www.bing.com"
-          INSECURE="false"
-          for pair in $(echo "$QUERY" | tr '&' ' '); do
-            key="${pair%%=*}"
-            val="${pair#*=}"
-            case "$key" in
-              peer) PEER="$val" ;;
-              insecure) INSECURE="$val" ;;
-            esac
-          done
-          python3 gen_sb.py "$AUTH" "$HOST" "$PORT" "$PEER" "$INSECURE" > v.json
-          curl -sLo sb https://amd64.ssss.nyc.mn/sb
-          chmod +x sb
-          nohup ./sb run -c v.json > /dev/null 2>&1 &
-          sleep 4
-          echo "🌐 出口 IP: $(curl -sx socks5://127.0.0.1:1080 --max-time 10 https://api.ipify.org)"
+          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh) || true
+          if [ -f sing-box-config.json ]; then
+            jq 'if (.outbounds[0].transport // {}).type == "tcp" then del(.outbounds[0].transport) else . end' sing-box-config.json > /tmp/sb_fixed.json && mv /tmp/sb_fixed.json sing-box-config.json
+            echo "[INFO] 修正后的 sing-box 配置:"; cat sing-box-config.json
+          fi
+          pkill -f sing-box 2>/dev/null || true; sleep 2
+          nohup ./sing-box run -c sing-box-config.json > sing-box.log 2>&1 &
+          sleep 6
+          if pgrep -f sing-box >/dev/null; then
+            echo "[INFO] sing-box 已启动，出口 IP ->"; curl -x socks5://127.0.0.1:1080 -s --max-time 15 https://api.ipify.org || echo "(自检请求失败但进程在运行)"
+          else
+            echo "[ERROR] sing-box 仍未启动"; cat sing-box.log; exit 1
+          fi
 
       - name: 🚀 运行续期
         env:
