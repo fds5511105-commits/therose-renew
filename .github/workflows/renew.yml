@@ -49,11 +49,20 @@ jobs:
             echo "PROXY=$PROXY" >> "$GITHUB_ENV"
             echo "✅ SOCKS 代理已配置"
           else
-            # 节点链接（vmess/vless/trojan/hy2）→ btpp05/mochi 验证过的 setup_proxy.sh
+            # 节点链接（vmess/vless/trojan/hysteria2/ss）→ 本地 setup_proxy.sh 建 SOCKS
             echo "🔧 用 setup_proxy.sh 从节点链接建代理"
-            curl -fsSL https://raw.githubusercontent.com/btpp05/mochi-hosting-renew/main/setup_proxy.sh -o setup_proxy.sh
             chmod +x setup_proxy.sh
             ./setup_proxy.sh "$NODE_LINK"
+            # 修正部分协议生成的非法 transport:tcp 字段（sing-box v1.13+ 不认）
+            if [ -f sing-box-config.json ]; then
+              jq 'if (.outbounds[0].transport // {}).type == "tcp" then del(.outbounds[0].transport) else . end' sing-box-config.json > /tmp/sb_fixed.json && mv /tmp/sb_fixed.json sing-box-config.json
+              echo "🔧 修正后的 sing-box 配置:"; cat sing-box-config.json
+            fi
+            # 用 nohup 重新拉起，确保 sing-box 跨步骤存活（脚本自带的 & 可能被步骤结束时清理）
+            pkill -f sing-box 2>/dev/null; sleep 2
+            nohup ./sing-box run -c sing-box-config.json > sing-box.log 2>&1 &
+            disown 2>/dev/null || true
+            sleep 5
             echo "PROXY=socks5://127.0.0.1:1080" >> "$GITHUB_ENV"
             echo "✅ 代理已启动，自检中..."
             curl -fsS --max-time 20 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org || echo "⚠️ 代理自检失败"
