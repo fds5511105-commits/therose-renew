@@ -184,52 +184,84 @@ def main():
 
         print("📄 开始续期...")
 
-        # === 诊断：抓 dashboard 可点元素 + 截图，确认 Extend/Renew 控件 ===
+        # Extend 续费按钮在服务器列表页 /panel?routeName=servers，不在 dashboard
+        # （dashboard 上的 "Renew #xxxx" 只是服务器名字，不是按钮）
         try:
-            sb.save_screenshot("dashboard.png")
-            send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "dashboard.png", "🖥️ 登录后 dashboard（调试用）")
-            els = sb.execute_script(
-                "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||e.getAttribute('title')||'').trim())).filter(t=>t)")
-            print("🔘 dashboard 可点元素:", " | ".join(els[:50]))
+            sb.open("https://client.therose.cloud/panel?routeName=servers")
+            print("✅ 打开 servers 页")
         except Exception as e:
-            print(f"⚠️ dashboard 诊断失败: {e}")
-
-        # 进入服务器管理页（dashboard 没有 Extend，需点进去）
-        try:
-            sb.uc_click('a:contains("Manage server")', timeout=10)
-            print("✅ 点击 Manage server")
-        except Exception as e:
-            print(f"⚠️ 点击 Manage server 失败: {e}，改试 My servers")
+            print(f"⚠️ 打开 servers 页失败: {e}，改点 My servers")
             try:
                 sb.uc_click('a:contains("My servers")', timeout=10)
-                print("✅ 点击 My servers")
             except Exception as e2:
                 print(f"⚠️ My servers 也失败: {e2}")
         time.sleep(3)
         print("📄 当前URL:", sb.get_current_url())
-        sb.save_screenshot("server_page.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "server_page.png", "🖥️ 服务器页（调试）")
+        sb.save_screenshot("servers_page.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "servers_page.png", "🖥️ 服务器实例页（调试）")
         try:
             txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
-            print("📝 页面文字:", txt[:1800])
-        except Exception as e:
-            print(f"⚠️ 取文字失败: {e}")
+            print("📝 服务器页文字:", txt[:1800])
+        except Exception:
+            pass
         els = sb.execute_script(
-            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||e.getAttribute('title')||'').trim())).filter(t=>t)")
+            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
         print("🔘 服务器页可点元素:", " | ".join(els[:60]))
-        ext = [t for t in els if any(k in t.lower() for k in ["extend","renew","延长","续"])]
-        print("🔎 疑似续费控件:", " | ".join(ext) if ext else "(无)")
 
-        # 检查结果
-        time.sleep(5)
+        # 点 Extend（服务器详情页的续费按钮，灰色 refresh 图标）
+        try:
+            sb.uc_click('button:contains("Extend"), a:contains("Extend")', timeout=10)
+            print("✅ 点击 Extend")
+        except Exception as e:
+            print(f"⚠️ 点击 Extend 失败: {e}")
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 未找到 Extend 按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
+            return
+        time.sleep(4)
+        print("📄 Extend 后 URL:", sb.get_current_url())
+        sb.save_screenshot("extend_page.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "extend_page.png", "🖥️ 续费弹窗（调试）")
+        try:
+            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
+            print("📝 续费页文字:", txt[:1500])
+        except Exception:
+            pass
+        els = sb.execute_script(
+            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
+        print("🔘 续费页可点元素:", " | ".join(els[:60]))
+
+        # 选时长（如有 select/radio，默认第一个）
+        try:
+            sb.execute_script(
+                "var s=document.querySelector('select');"
+                "if(s&&s.options.length){s.selectedIndex=0;s.dispatchEvent(new Event('change',{bubbles:true}));}"
+                "var r=document.querySelector('input[type=radio]');if(r)r.click();")
+            print("✅ 默认选了时长")
+        except Exception:
+            pass
+        time.sleep(1)
+
+        # 点确认/下单（兼容多种文案）
+        confirm_sel = ('button:contains("Order now"), button:contains("Confirm"), '
+                       'button:contains("Pay"), button:contains("提交"), '
+                       'button:contains("下单"), a:contains("Order now")')
+        try:
+            sb.uc_click(confirm_sel, timeout=10)
+            print("✅ 点击确认/下单")
+        except Exception as e:
+            print(f"⚠️ 点击确认失败: {e}")
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 续费页未找到确认按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
+            return
+
+        time.sleep(6)
         src = sb.get_page_source()
-        if "successfully purchased" in src.lower():
+        low = src.lower()
+        if any(k in low for k in ["successfully purchased", "续费成功", "renewed", "order confirmed", "payment successful"]):
             msg = f"✅ The Rose 续期成功！\n🌐 IP: {ip}\n📦 {REPO_URL}"
             sb.save_screenshot("success.png")
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
         else:
-            msg = f"❌ 续期可能失败\n🌐 IP: {ip}\n📦 {REPO_URL}"
+            msg = f"⚠️ 续期未确认成功（可能余额不足需充值，或确认按钮文案不同）\n🌐 IP: {ip}\n📦 {REPO_URL}"
             sb.save_screenshot("failed.png")
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
