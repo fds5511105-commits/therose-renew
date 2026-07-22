@@ -194,26 +194,25 @@ def main():
         except Exception as e:
             print(f"⚠️ dashboard 诊断失败: {e}")
 
-        # 点 Extend
+        # 进入服务器管理页（dashboard 没有 Extend，需点进去）
         try:
-            btn = sb.find_element('button:contains("Extend"), span:contains("Extend")', timeout=5)
-            print(f"✅ 找到 Extend 按钮")
-            sb.uc_click('button:contains("Extend"), span:contains("Extend")')
-            print("✅ 点击 Extend")
+            sb.uc_click('a:contains("Manage server")', timeout=10)
+            print("✅ 点击 Manage server")
         except Exception as e:
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 未找到 Extend 按钮\n📦 {REPO_URL}")
-            return
-
-        time.sleep(2)
-
-        # 点 Order now
-        try:
-            sb.find_element('button:contains("Order now")', timeout=5)
-            sb.uc_click('button:contains("Order now")')
-            print("✅ 点击 Order now")
-        except Exception as e:
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 未找到 Order now 按钮\n📦 {REPO_URL}")
-            return
+            print(f"⚠️ 点击 Manage server 失败: {e}，改试 My servers")
+            try:
+                sb.uc_click('a:contains("My servers")', timeout=10)
+                print("✅ 点击 My servers")
+            except Exception as e2:
+                print(f"⚠️ My servers 也失败: {e2}")
+        time.sleep(3)
+        sb.save_screenshot("server_page.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "server_page.png", "🖥️ 服务器页（调试）")
+        els = sb.execute_script(
+            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||e.getAttribute('title')||'').trim())).filter(t=>t)")
+        print("🔘 服务器页可点元素:", " | ".join(els[:60]))
+        ext = [t for t in els if any(k in t.lower() for k in ["extend","renew","延长","续"])]
+        print("🔎 疑似续费控件:", " | ".join(ext) if ext else "(无)")
 
         # 检查结果
         time.sleep(5)
