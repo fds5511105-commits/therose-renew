@@ -104,9 +104,14 @@ def login(sb, email, password):
     time.sleep(1) 
     print("🛡 处理 Turnstile...")
     try:
+        try:
+            sb.wait_for_element_present("iframe[src*='captcha'], .cf-turnstile, iframe.cf-turnstile-widget", timeout=10)
+        except Exception:
+            pass
+        time.sleep(2)
         sb.uc_gui_click_captcha()
         print("✅ Turnstile 验证已处理")
-        # sb.save_screenshot("turnstile_passed.png")
+        time.sleep(8)  # 等 Cloudflare 验证完成，表单解锁
     except Exception as e:
         print(f"⚠️ uc_gui_click_captcha 执行异常: {e}")
     print("🔑 点击登录按钮...")
@@ -119,7 +124,6 @@ def login(sb, email, password):
         print(f"📄 当前 URL: {current_url} | Title: {page_title}")
         if "panel" in current_url:
             print("✅ 登录成功，已跳转到 Dashboard")
-            # sb.save_screenshot("login_success.png")
             return True, current_url
         time.sleep(1)
 
