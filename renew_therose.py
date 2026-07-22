@@ -206,8 +206,14 @@ def main():
             except Exception as e2:
                 print(f"⚠️ My servers 也失败: {e2}")
         time.sleep(3)
+        print("📄 当前URL:", sb.get_current_url())
         sb.save_screenshot("server_page.png")
         send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "server_page.png", "🖥️ 服务器页（调试）")
+        try:
+            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
+            print("📝 页面文字:", txt[:1800])
+        except Exception as e:
+            print(f"⚠️ 取文字失败: {e}")
         els = sb.execute_script(
             "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||e.getAttribute('title')||'').trim())).filter(t=>t)")
         print("🔘 服务器页可点元素:", " | ".join(els[:60]))
