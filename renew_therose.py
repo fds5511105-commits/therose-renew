@@ -97,6 +97,13 @@ def login(sb):
     sb.save_screenshot("login_failed.png")
     print(f"❌ 登录失败: {sb.get_current_url()}")
     send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "login_failed.png", f"❌ 登录失败")
+    # dump 页面可见文字，定位报错原因
+    try:
+        body = sb.get_text("body") or ""
+        body = " ".join(body.split())
+        print(f"📝 页面文字: {body[:500]}")
+    except Exception as e:
+        print(f"⚠️ 取页面文字失败: {e}")
     err = get_page_errors(sb)
     if err:
         print(f"⚠️ 报错: {err}")
