@@ -74,7 +74,24 @@ def login(sb):
         except Exception:
             pass
         time.sleep(2)
-        sb.uc_gui_click_captcha()
+        clicked = False
+        try:
+            sb.uc_gui_click_captcha()
+            clicked = True
+            print("✅ uc_gui_click_captcha 已点击")
+        except Exception as e:
+            print(f"⚠️ uc_gui_click_captcha 失败: {e}")
+        # 兜底：直接点 .cf-turnstile 控件
+        if not clicked:
+            try:
+                sb.uc_click('.cf-turnstile, #cf-turnstile, iframe.cf-turnstile-widget', timeout=5)
+                clicked = True
+                print("✅ 兜底点击 Turnstile 控件")
+            except Exception as e2:
+                print(f"⚠️ 兜底点击也失败: {e2}")
+        # 立即截图看点击后状态（spinner / 交互式挑战），区分"没点到" vs "CF 拒了"
+        sb.save_screenshot("turnstile_click.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_click.png", "🛡️ Turnstile 点击后立即状态")
         print("✅ Turnstile 已点击，等待验证...")
         # 轮询 cf-turnstile-response 隐藏字段，确认 CF 真放过
         solved = False
@@ -95,7 +112,7 @@ def login(sb):
             print("⚠️ Turnstile 未在 30s 内通过，仍尝试登录")
         time.sleep(3)
         sb.save_screenshot("turnstile_after.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_after.png", "🛡️ Turnstile 处理后截图")
+
     except Exception as e:
         print(f"⚠️ Turnstile 处理异常: {e}")
 
