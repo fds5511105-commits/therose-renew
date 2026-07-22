@@ -75,8 +75,25 @@ def login(sb):
             pass
         time.sleep(2)
         sb.uc_gui_click_captcha()
-        print("✅ Turnstile 验证已处理")
-        time.sleep(8)
+        print("✅ Turnstile 已点击，等待验证...")
+        # 轮询 cf-turnstile-response 隐藏字段，确认 CF 真放过
+        solved = False
+        for _ in range(30):
+            try:
+                val = sb.execute_script(
+                    "var el=document.querySelector('[name=\"cf-turnstile-response\"]');"
+                    "return el ? (el.value || '') : '';")
+                if val and len(val) > 10:
+                    solved = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+        if solved:
+            print("✅ Turnstile 验证通过 (token 已获取)")
+        else:
+            print("⚠️ Turnstile 未在 30s 内通过，仍尝试登录")
+        time.sleep(3)
         sb.save_screenshot("turnstile_after.png")
         send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_after.png", "🛡️ Turnstile 处理后截图")
     except Exception as e:
