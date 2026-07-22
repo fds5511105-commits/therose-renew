@@ -146,10 +146,27 @@ def login(sb):
 def main():
     print("🚀 启动浏览器")
 
-    sb_kwargs = {"uc": True, "headless": False}
+    sb_kwargs: dict = {"uc": True, "headless": False}
+    proxy_user = proxy_pass = None
+    proxy_arg = PROXY_URL
     if PROXY_URL:
-        print(f"🔗 代理: {PROXY_URL}")
-        sb_kwargs["proxy"] = PROXY_URL
+        # Chrome 不认 URL 内嵌的 SOCKS5 凭据 → 用 SeleniumBase 的 proxy_user/proxy_pass
+        # （会生成代理认证扩展，正确处理 SOCKS5 auth）
+        try:
+            from urllib.parse import urlparse, unquote
+            p = urlparse(PROXY_URL)
+            if p.username or p.password:
+                proxy_user = unquote(p.username or "")
+                proxy_pass = unquote(p.password or "")
+                scheme = "socks5" if p.scheme.startswith("socks") else p.scheme
+                proxy_arg = f"{scheme}://{p.hostname}:{p.port}"
+        except Exception:
+            pass
+        print(f"🔗 代理: {proxy_arg}")
+        sb_kwargs["proxy"] = proxy_arg
+        if proxy_user:
+            sb_kwargs["proxy_user"] = proxy_user
+            sb_kwargs["proxy_pass"] = proxy_pass
 
     with SB(**sb_kwargs) as sb:
         # IP 检测
