@@ -3,7 +3,13 @@ name: The Rose Cloud Renew
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */12 * * *'
+    # 服务器每 12h 到期，面板只允许「到期前 30 分钟内」续期
+    # 窗口约 04:41-05:11 与 16:41-17:11 UTC，每次窗口内多打几个点防延迟/验证失败
+    - cron: '38,48,55,59 4,16 * * *'
+
+concurrency:
+  group: therose-renew
+  cancel-in-progress: false
 
 permissions:
   actions: write

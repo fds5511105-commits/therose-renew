@@ -89,9 +89,8 @@ def login(sb):
                 print("✅ 兜底点击 Turnstile 控件")
             except Exception as e2:
                 print(f"⚠️ 兜底点击也失败: {e2}")
-        # 立即截图看点击后状态（spinner / 交互式挑战），区分"没点到" vs "CF 拒了"
+        # 截图看点击后状态（本地留档；仅未通过时才发 TG，避免刷屏）
         sb.save_screenshot("turnstile_click.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_click.png", "🛡️ Turnstile 点击后立即状态")
         print("✅ Turnstile 已点击，等待验证...")
         # 轮询 cf-turnstile-response 隐藏字段，确认 CF 真放过
         solved = False
@@ -110,6 +109,7 @@ def login(sb):
             print("✅ Turnstile 验证通过 (token 已获取)")
         else:
             print("⚠️ Turnstile 未在 30s 内通过，仍尝试登录")
+            send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_click.png", "🛡️ Turnstile 未通过（调试）")
         time.sleep(3)
         sb.save_screenshot("turnstile_after.png")
 
@@ -184,132 +184,89 @@ def main():
 
         print("📄 开始续期...")
 
-        # Extend 续费按钮在服务器列表页 /panel?routeName=servers，不在 dashboard
-        # （dashboard 上的 "Renew #xxxx" 只是服务器名字，不是按钮）
-        try:
-            sb.open("https://client.therose.cloud/panel?routeName=servers")
-            print("✅ 打开 servers 页")
-        except Exception as e:
-            print(f"⚠️ 打开 servers 页失败: {e}，改点 My servers")
+        # 读服务器到期时间，判断是否在「到期前 30 分钟」续期窗口内
+        # 面板规则：Renewal is available only within 30 minutes before expiration
+        def get_valid_until():
             try:
-                sb.uc_click('a:contains("My servers")', timeout=10)
-            except Exception as e2:
-                print(f"⚠️ My servers 也失败: {e2}")
-        time.sleep(3)
-        print("📄 当前URL:", sb.get_current_url())
-        sb.save_screenshot("servers_page.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "servers_page.png", "🖥️ 服务器实例页（调试）")
-        try:
-            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
-            print("📝 服务器页文字:", txt[:1800])
-        except Exception:
-            pass
-        els = sb.execute_script(
-            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
-        print("🔘 服务器页可点元素:", " | ".join(els[:60]))
+                sb.open("https://client.therose.cloud/panel?routeName=servers")
+                time.sleep(3)
+                txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
+                m = re.search(r"Valid until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
+                return (m.group(1) if m else None), txt
+            except Exception as e:
+                return None, ""
 
-        # 点 Extend（服务器详情页的续费按钮，灰色 refresh 图标）
-        try:
-            sb.uc_click('button:contains("Extend"), a:contains("Extend")', timeout=10)
-            print("✅ 点击 Extend")
-        except Exception as e:
-            print(f"⚠️ 点击 Extend 失败: {e}")
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 未找到 Extend 按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
+        valid_str, _ = get_valid_until()
+        print("📅 当前 Valid until:", valid_str)
+        if not valid_str:
+            sb.save_screenshot("err_novalid.png")
+            send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "err_novalid.png", f"❌ 读不到 Valid until（可能服务器已过期/消失）\n🌐 IP: {ip}\n📦 {REPO_URL}")
             return
-        time.sleep(4)
-        print("📄 Extend 后 URL:", sb.get_current_url())
-        sb.save_screenshot("extend_page.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "extend_page.png", "🖥️ 续费弹窗（调试）")
         try:
-            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
-            print("📝 续费页文字:", txt[:1500])
+            expiry = datetime.strptime(valid_str, "%Y-%m-%d %H:%M")
         except Exception:
-            pass
-        els = sb.execute_script(
-            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
-        print("🔘 续费页可点元素:", " | ".join(els[:60]))
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ Valid until 解析失败: {valid_str}\n🌐 IP: {ip}\n📦 {REPO_URL}")
+            return
+        mins_left = (expiry - datetime.utcnow()).total_seconds() / 60.0
+        print(f"⏳ 距到期约 {mins_left:.0f} 分钟")
 
-        # 选时长（如有 select/radio，默认第一个）
-        try:
-            sb.execute_script(
-                "var s=document.querySelector('select');"
-                "if(s&&s.options.length){s.selectedIndex=0;s.dispatchEvent(new Event('change',{bubbles:true}));}"
-                "var r=document.querySelector('input[type=radio]');if(r)r.click();")
-            print("✅ 默认选了时长")
-        except Exception:
-            pass
-        time.sleep(1)
+        # 续期窗口：到期前 30 分钟内（且未过期）；否则静默跳过，不刷 TG
+        if mins_left > 30 or mins_left <= 0:
+            print("ℹ️ 不在续期窗口（需到期前 30 分钟内），本次跳过")
+            return
 
-        # 点确认/下单（兼容多种文案）
+        # ---- 进入续期流程（窗口内）----
         confirm_sel = ('button:contains("Order now"), button:contains("Confirm"), '
                        'button:contains("Pay"), button:contains("提交"), '
                        'button:contains("下单"), a:contains("Order now")')
-        try:
-            sb.uc_click(confirm_sel, timeout=10)
-            print("✅ 点击确认/下单")
-        except Exception as e:
-            print(f"⚠️ 点击确认失败: {e}")
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, f"❌ 续费页未找到确认按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
-            return
-
-        time.sleep(4)
-        # 诊断：点 Order now 后当前页（可能跳到 checkout/invoice）
-        print("📄 Order now 后 URL:", sb.get_current_url())
-        sb.save_screenshot("after_order.png")
-        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "after_order.png", "🖥️ Order now 后页面（调试）")
-        try:
-            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
-            print("📝 Order now 后文字:", txt[:1200])
-        except Exception:
-            pass
-        els = sb.execute_script(
-            "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||'').trim())).filter(t=>t)")
-        print("🔘 Order now 后可点元素:", " | ".join(els[:60]))
-
-        # 点 Order now 后可能跳到 checkout/invoice 页，需再点「完成/支付」
-        try:
-            sb.uc_click('button:contains("Complete"), button:contains("Pay now"), button:contains("Pay"), button:contains("Place order"), button:contains("Checkout"), a:contains("Complete order")', timeout=8)
-            print("✅ 点击完成/支付")
-            time.sleep(5)
-        except Exception:
-            print("ℹ️ 无后续完成按钮（可能已直接下单）")
-        # 也可能弹确认框
-        try:
-            sb.uc_click('button:contains("Confirm"), button:contains("Yes"), button:contains("确定")', timeout=5)
-            print("✅ 点击确认弹窗")
+        renewed = False
+        for attempt in range(3):
+            try:
+                sb.open("https://client.therose.cloud/panel?routeName=servers")
+                time.sleep(2)
+                sb.uc_click('button:contains("Extend"), a:contains("Extend")', timeout=10)
+                print(f"✅ 点击 Extend (尝试 {attempt+1})")
+            except Exception as e:
+                print(f"⚠️ 点击 Extend 失败: {e}")
+                sb.save_screenshot("err_extend.png")
+                send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "err_extend.png", f"❌ 未找到 Extend 按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
+                return
             time.sleep(4)
-        except Exception:
-            pass
-
-        # 以服务器实际到期日为准验证是否真续上（比关键词可靠）
-        time.sleep(2)
-        try:
-            sb.open("https://client.therose.cloud/panel?routeName=servers")
-            time.sleep(3)
-            txt = sb.execute_script("return (document.body.innerText||'').replace(/\\s+/g,' ').trim()")
-            m = re.search(r"Valid until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
-            new_valid = m.group(1) if m else "?"
-            print("📅 续期后 Valid until:", new_valid)
-            if new_valid not in ("2026-07-22 17:11", "?"):
-                msg = f"✅ The Rose 续期成功！新到期 {new_valid}\n🌐 IP: {ip}\n📦 {REPO_URL}"
-                sb.save_screenshot("success.png")
+            # 选时长（如有 select/radio，默认第一个）
+            try:
+                sb.execute_script(
+                    "var s=document.querySelector('select');"
+                    "if(s&&s.options.length){s.selectedIndex=0;s.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    "var r=document.querySelector('input[type=radio]');if(r)r.click();")
+            except Exception:
+                pass
+            time.sleep(1)
+            # 点 Order now（0 币免费，直接下单）
+            try:
+                sb.uc_click(confirm_sel, timeout=10)
+                print("✅ 点击 Order now")
+            except Exception as e:
+                print(f"⚠️ 点击 Order now 失败: {e}")
+                sb.save_screenshot("err_order.png")
+                send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "err_order.png", f"❌ 未找到 Order now 按钮\n🌐 IP: {ip}\n📦 {REPO_URL}")
+                return
+            time.sleep(5)
+            # 验证：回 servers 页看 Valid until 是否后推
+            valid2, txt2 = get_valid_until()
+            print(f"📅 续期后 Valid until: {valid2} (尝试 {attempt+1})")
+            if valid2 and valid2 != valid_str:
+                renewed = True
+                msg = f"✅ The Rose 续期成功！新到期 {valid2}\n🌐 IP: {ip}\n📦 {REPO_URL}"
                 print(msg)
                 send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+                break
             else:
-                msg = f"⚠️ 续期未生效（Valid until 仍为/未知: {new_valid}）\n🌐 IP: {ip}\n📦 {REPO_URL}"
-                sb.save_screenshot("failed.png")
-                print(msg)
-                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
-        except Exception as e:
-            print(f"⚠️ 验证失败: {e}")
-            src = sb.get_page_source().lower()
-            if any(k in src for k in ["successfully purchased", "续费成功", "renewed", "order confirmed", "payment successful"]):
-                msg = f"✅ The Rose 续期成功！\n🌐 IP: {ip}\n📦 {REPO_URL}"
-            else:
-                msg = f"⚠️ 续期状态未知\n🌐 IP: {ip}\n📦 {REPO_URL}"
+                print(f"⚠️ 第 {attempt+1} 次未生效，稍后重试")
+                time.sleep(20)
+        if not renewed:
             sb.save_screenshot("failed.png")
-            print(msg)
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "failed.png", f"❌ 续期未生效（窗口内多次失败）\n🌐 IP: {ip}\n📦 {REPO_URL}")
+            print("❌ 续期未生效")
 
     print("🏁 完毕")
 
