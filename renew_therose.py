@@ -184,6 +184,16 @@ def main():
 
         print("📄 开始续期...")
 
+        # === 诊断：抓 dashboard 可点元素 + 截图，确认 Extend/Renew 控件 ===
+        try:
+            sb.save_screenshot("dashboard.png")
+            send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "dashboard.png", "🖥️ 登录后 dashboard（调试用）")
+            els = sb.execute_script(
+                "return Array.from(document.querySelectorAll('button,a,.btn,[role=button]')).map(e=>((e.innerText||e.value||e.getAttribute('title')||'').trim())).filter(t=>t)")
+            print("🔘 dashboard 可点元素:", " | ".join(els[:50]))
+        except Exception as e:
+            print(f"⚠️ dashboard 诊断失败: {e}")
+
         # 点 Extend
         try:
             btn = sb.find_element('button:contains("Extend"), span:contains("Extend")', timeout=5)
