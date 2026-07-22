@@ -4,19 +4,64 @@ import os,re,sys,time,requests
 from seleniumbase import SB
 
 # 环境变量 
-EMAIL = os.environ.get("EMAIL") or ""            # 邮箱   
-PASSWORD = os.environ.get("PASSWORD") or ""      # 密码
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""  # tg通知 bot token
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""      # tg通知 chat_id id
+EMAIL = os.environ.get("EMAIL") or ""
+PASSWORD = os.environ.get("PASSWORD") or ""
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
 
 BASE_URL = "https://client.therose.cloud/login"
+REPO_URL = "https://github.com/btpp05/therose-renew"
 
-# 检查必要变量
 if not EMAIL or not PASSWORD:
     print("❌ 请设置环境变量 EMAIL 和 PASSWORD")
     sys.exit(1)
 
-# 点击续期按钮
+def send_tg(token, chat_id, message):
+    if not token or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        resp = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
+        if resp.status_code == 200:
+            print("📨 Telegram 通知已发送")
+        else:
+            print(f"❌ Telegram 发送失败: {resp.text}")
+    except Exception as e:
+        print(f"❌ Telegram 发送异常: {e}")
+
+def send_tg_photo(token, chat_id, photo_path, caption=""):
+    if not token or not chat_id:
+        return
+    if not os.path.exists(photo_path):
+        return
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    try:
+        with open(photo_path, "rb") as f:
+            resp = requests.post(url, data={"chat_id": chat_id, "caption": caption},
+                                files={"photo": f}, timeout=15)
+        if resp.status_code == 200:
+            print(f"📸 截图已发 TG: {photo_path}")
+        else:
+            print(f"❌ TG 截图发送失败: {resp.text[:200]}")
+    except Exception as e:
+        print(f"❌ TG 截图发送异常: {e}")
+
+def get_page_errors(sb):
+    """从页面源码抓取报错信息"""
+    try:
+        src = sb.get_page_source()
+        keywords = [r'incorrect', r'invalid', r'wrong', r'error', r'fail',
+                    r'not found', r'错误', r'失败', r'不正确', r'locked']
+        for pat in keywords:
+            m = re.search(pat, src, re.IGNORECASE)
+            if m:
+                s = max(0, m.start() - 120)
+                err = re.sub(r'<[^>]+>', ' ', src[s:m.end() + 120]).strip()
+                return err[:300]
+    except:
+        pass
+    return None
+
 def click_extend_button(sb):
     selectors = [
         'span:contains("Extend")',
@@ -39,7 +84,6 @@ def click_extend_button(sb):
     except Exception as e:
         return False, {"error": str(e)}
 
-# 检查续期是否成功
 def check_renewal_success(sb):
     """检查是否出现续期成功的提示"""
     success_selectors = [
@@ -65,7 +109,6 @@ def check_renewal_success(sb):
         except:
             continue
     
-    # 如果没有找到特定选择器，检查页面源码是否包含成功关键词
     try:
         page_source = sb.get_page_source()
         if "successfully purchased" in page_source.lower():
@@ -76,32 +119,18 @@ def check_renewal_success(sb):
     
     return False, "未检测到续期成功提示"
 
-# 发送tg通知
-def send_tg(token, chat_id, message):
-    if not token or not chat_id:
-        return
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    try:
-        resp = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
-        if resp.status_code == 200:
-            print("📨 Telegram 通知已发送")
-        else:
-            print(f"❌ Telegram 发送失败: {resp.text}")
-    except Exception as e:
-        print(f"❌ Telegram 发送异常: {e}")
-
-# 登录流程
 def login(sb, email, password):
     print("🌐 打开登录页面...")
-    print("⏳ 等待页面加载...")
     sb.open(BASE_URL)
     sb.wait_for_ready_state_complete()
-    sb.sleep(1)
+    time.sleep(2)
+
     print("📧 填写邮箱...")
     sb.type('#login_form_email', email, timeout=10)
     print("🔑 填写密码...")
     sb.type('#login_form_password', password, timeout=10)
-    time.sleep(1) 
+    time.sleep(1)
+
     print("🛡 处理 Turnstile...")
     try:
         try:
@@ -111,52 +140,67 @@ def login(sb, email, password):
         time.sleep(2)
         sb.uc_gui_click_captcha()
         print("✅ Turnstile 验证已处理")
-        time.sleep(8)  # 等 Cloudflare 验证完成，表单解锁
+        time.sleep(8)
+        # 截图发TG诊断
+        sb.save_screenshot("turnstile_after.png")
+        send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "turnstile_after.png", "🛡️ Turnstile 处理后截图（看盾的勾打上没）")
     except Exception as e:
-        print(f"⚠️ uc_gui_click_captcha 执行异常: {e}")
+        print(f"⚠️ Turnstile 处理异常: {e}")
+
     print("🔑 点击登录按钮...")
     sb.uc_click('button:contains("Sign in")')
-    sb.sleep(3)
+
     for _ in range(30):
-        # 判断是否登录成功
         current_url = sb.get_current_url()
         page_title = sb.get_title() or ""
         print(f"📄 当前 URL: {current_url} | Title: {page_title}")
-        if "panel" in current_url:
+        if "panel" in current_url or "dashboard" in current_url or "client" in current_url.lower():
             print("✅ 登录成功，已跳转到 Dashboard")
             return True, current_url
         time.sleep(1)
 
     print(f"❌ 登录失败，当前 URL: {sb.get_current_url()}")
-    sb.save_screenshot("login_faild.png")
+    # 截图发TG诊断
+    sb.save_screenshot("login_failed.png")
+    send_tg_photo(TG_BOT_TOKEN, TG_CHAT_ID, "login_failed.png", f"❌ 登录失败，URL: {sb.get_current_url()}")
+    err = get_page_errors(sb)
+    if err:
+        print(f"⚠️ 页面报错: {err}")
     return False, sb.get_current_url()
 
-# 主流程
 def main():
     print("🚀 启动浏览器")
 
     with SB(uc=True, headless=False) as sb:
+        # 检测出口IP
+        proxy_ip = ""
+        try:
+            sb.open("https://api.ipify.org?format=json")
+            ip_text = sb.get_text("body")
+            proxy_ip = ip_text.strip()[:50]
+            print(f"📍 当前出口IP: {proxy_ip}")
+        except:
+            print("⚠️ 获取 IP 失败")
+
         success, url = login(sb, EMAIL, PASSWORD)
         
         if not success:
-            msg = f"❌ 登录失败"
+            msg = f"❌ 登录失败\n🌐 IP: {proxy_ip}\n📦 仓库: {REPO_URL}"
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
             return
 
         print("📄 开始续期流程...")
         
-        # 点击 Extend 按钮
         ok, info = click_extend_button(sb)
         if not ok:
-            msg = f"❌ 点击 Extend 按钮失败: {info.get('error')}"
+            msg = f"❌ 点击 Extend 按钮失败: {info.get('error')}\n📦 仓库: {REPO_URL}"
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
             return
         
         time.sleep(1)
         
-        # 点击 Order now 按钮
         try:
             button = sb.find_element('button:contains("Order now")', timeout=5)
             if button:
@@ -164,26 +208,25 @@ def main():
                 sb.uc_click('button:contains("Order now")')
                 print("✅ 已点击 Order now 按钮")
             else:
-                msg = "❌ 未找到 Order now 按钮"
+                msg = f"❌ 未找到 Order now 按钮\n📦 仓库: {REPO_URL}"
                 print(msg)
                 send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                 return
         except Exception as e:
-            msg = f"❌ 点击 Order now 失败: {e}"
+            msg = f"❌ 点击 Order now 失败: {e}\n📦 仓库: {REPO_URL}"
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
             return
         
-        # 检查续期是否成功
         print("🔍 检查续期结果...")
         renewal_success, renewal_msg = check_renewal_success(sb)
         
         if renewal_success:
-            msg = f"✅ 续期成功！{renewal_msg}"
+            msg = f"✅ The Rose Cloud 续期成功！\n{renewal_msg}\n🌐 IP: {proxy_ip}\n📦 仓库: {REPO_URL}"
             print(msg)
             sb.save_screenshot("renewal_success.png")
         else:
-            msg = f"❌ 续期可能失败: {renewal_msg}"
+            msg = f"❌ 续期可能失败: {renewal_msg}\n🌐 IP: {proxy_ip}\n📦 仓库: {REPO_URL}"
             print(msg)
             sb.save_screenshot("renewal_failed.png")
         
