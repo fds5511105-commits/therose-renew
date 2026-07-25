@@ -3,86 +3,82 @@ name: The Rose Cloud Renew
 on:
   workflow_dispatch:
 
+# 限制并发运行：如果当前有正在运行的相同工作流，则取消旧的运行新任务
 concurrency:
-  group: therose-renew
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   actions: write
   contents: read
 
 jobs:
-  renew:
+  Renew-therose:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: 📥 拉取脚本
-        uses: actions/checkout@v4
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4 # 修正为当前最新的 v4 版本
 
-      - name: 🐍 安装依赖
+      - name: ⚙️ 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          # 删掉了 cache: 'pip' 这一行
+
+      - name: 🛠️ 安装系统依赖和 Python 依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb python3-tk python3-dev jq
-          pip install seleniumbase requests --quiet
+          sudo apt-get install -y xvfb
+          pip install seleniumbase requests
           seleniumbase install chromedriver
 
-      - name: ⚙️ 配置代理
+      - name: 🌐 设置代理 (sing-box)
         env:
           NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
-          set -e
-          if [ -z "$NODE_LINK" ]; then
-            echo "⚠️ 未设置 NODE_LINK，直连"
-            echo "PROXY=" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          # 现成 SOCKS 代理：socks://base64(user:pass@host:port)?remarks=...
-          if [[ "$NODE_LINK" == socks://* ]] || [[ "$NODE_LINK" == socks5://* ]]; then
-            echo "🧦 检测到 SOCKS 链接，直接使用"
-            b64="${NODE_LINK#*://}"
-            b64="${b64%%\?*}"
-            decoded=$(python3 -c "import base64,sys; print(base64.b64decode(sys.argv[1]).decode())" "$b64")
-            if [ -z "$decoded" ]; then
-              echo "❌ SOCKS 链接 base64 解码失败"; exit 1
-            fi
-            PROXY="socks5://$decoded"
-            echo "::add-mask::$PROXY"   # 日志里遮蔽凭据
-            echo "PROXY=$PROXY" >> "$GITHUB_ENV"
-            echo "✅ SOCKS 代理已配置"
-          else
-            # 节点链接（vmess/vless/trojan/hysteria2/ss）→ 本地 setup_proxy.sh 建 SOCKS
-            echo "🔧 用 setup_proxy.sh 从节点链接建代理"
-            chmod +x setup_proxy.sh
-            ./setup_proxy.sh "$NODE_LINK"
-            # 修正部分协议生成的非法 transport:tcp 字段（sing-box v1.13+ 不认）
-            if [ -f sing-box-config.json ]; then
-              jq 'if (.outbounds[0].transport // {}).type == "tcp" then del(.outbounds[0].transport) else . end' sing-box-config.json > /tmp/sb_fixed.json && mv /tmp/sb_fixed.json sing-box-config.json
-              echo "🔧 修正后的 sing-box 配置:"; cat sing-box-config.json
-            fi
-            # 用 nohup 重新拉起，确保 sing-box 跨步骤存活（脚本自带的 & 可能被步骤结束时清理）
-            pkill -f sing-box 2>/dev/null; sleep 2
-            nohup ./sing-box run -c sing-box-config.json > sing-box.log 2>&1 &
-            disown 2>/dev/null || true
-            sleep 5
-            echo "PROXY=socks5://127.0.0.1:1080" >> "$GITHUB_ENV"
-            echo "✅ 代理已启动，自检中..."
-            curl -fsS --max-time 20 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org || echo "⚠️ 代理自检失败"
-          fi
+          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
 
-      - name: 🚀 运行续期
+      - name: 🚀 运行续期与重启脚本
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: |
-          xvfb-run --auto-servernum python3 renew_therose.py
+          SERVER_URL: ${{ secrets.SERVER_URL }} # [新增] 传递服务器面板链接
+          IS_PROXY: ${{ env.IS_PROXY }}
+          PROXY_SERVER: ${{ env.PROXY_SERVER }}
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python3 therose.py
 
-      - name: 🧽 清理
+      - name: 📤 上传运行截图 (用于排错)
+        if: always() # 无论成功或失败都会执行
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-screenshots
+          path: ./*.png # 捕获根目录下所有的截图
+          retention-days: 3 # 截图保留3天即可
+
+      - name: 🧽 清理进程和临时文件
         if: always()
         run: |
           pkill -f sing-box || true
           pkill -f chromedriver || true
           pkill -f chrome || true
           pkill -f Xvfb || true
+          rm -f sing-box sing-box-config.json sing-box.log
+
+      - name: 🧹 清理旧的工作流运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
